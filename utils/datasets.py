@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from PIL import Image
+import json
 
 
 # utilities
@@ -667,23 +668,182 @@ class COIL100Dataset(CLTTDataset):
         return dataframe
 
 
+class RoadDefectsDataset(CLTTDataset):
+    """
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        pass
+
+    def get_dataset_properties(self):
+
+        # basic properties (need to be there)
+        self.n_objects = 12  # number of different objects >= n_classes
+        self.n_classes = 12  # number of different classes
+        self.labels = ['Affaissement de rive',
+                       'Affaissement hors rive',
+                       'Arrachement',
+                       'Autres réparations',
+                       'Faïençage',
+                       'Fissure longitudinale',
+                       'Fissure transversale',
+                       'Glaçage - Ressuage',
+                       'Réparation en BB sur découpe',
+                       'Fissure thermique',
+                       'Orniérage',
+                       'Background'
+        ]
+        
+        self.subdirectory = '/home/theo/workdir/mmcls/test/'  # where is the dataset
+        self.name = 'Road defects'  # name of the dataset
+        self.label_file = '/home/theo/workdir/mmcls/test/no_contract_CD_33_20200911_122918_030.json'
+
+        # custom properties (optional, dataset specific)
+        # (anything you would want to have available in self)
+
+        pass
+
+    def get_N_randomwalk_steps(self, N, object_nr, n_views_per_object):
+        """
+        Get index values of N random walk steps of a object specified by "object_nr".
+        """
+        index = []
+        current_idx = np.random.randint(0, n_views_per_object - 1)
+        for i in range(N):
+            while True:
+                # 2 possible direction in which to go from the current position
+                # Possible steps: +: left, -: right
+                rand = np.random.randint(low=0, high=2)
+                if (rand == 0) & (current_idx > 0):
+                    current_idx -= 1
+                    break
+                if (rand == 1) & (current_idx < self.n_views_per_object - 1):
+                    current_idx += 1
+                    break
+            index.append(current_idx)
+        index = np.array(index)
+        index += self.n_views_per_object * object_nr
+        return index
+
+    def build_registry(self, train):
+        """
+        build a registry of all image files
+        """
+        path_list = []
+        object_list = []
+        label_list = []
+        time_list = []
+
+        # d = self.root + self.subdirectory
+#        d = self.subdirectory + 'train/' if train else self.subdirectory + 'test/'
+        d = self.subdirectory
+
+        list_of_files = os.listdir(d)
+        list_of_files = [f for f in list_of_files if 'jpg' in f]
+        
+        #load labels
+        with open(self.label_file, 'r') as f_in:
+            labels = json.load(f_in)
+
+        # dict to count instances of each class/object
+        time_dict = {l:0 for l in self.labels}
+            
+        for path in list_of_files:
+            full_path = os.path.join(d, path)
+            if os.path.isfile(full_path):
+                for label in set(labels[path]):
+                    path_list.append(full_path)
+                    object_list.append(self.labels.index(label))
+                    label_list.append(self.labels.index(label))
+                    time_list.append(time_dict[label])
+                    time_dict[label] += 1
+
+        tempdict = {'path_to_file': path_list, 'label': label_list, 'object_nr': object_list, 'time_idx': time_list}
+
+        dataframe = pd.DataFrame(tempdict)
+        dataframe.sort_values(by=['object_nr', 'time_idx'], inplace=True)
+        dataframe.reset_index(drop=True, inplace=True)
+        return dataframe
+
+    def build_buffer(self, registry, sampling_mode, n_fix, shuffle_object_order, approx_size):
+        """
+        build_buffer builds a buffer from all data that is available
+        according to the sampling mode specified. Default method just
+        returns the whole registry
+        """
+        
+        # if n_fix is a probability, then get an expected value of the number of views
+        expected_views = n_fix if n_fix >= 1 else self.expected_n(n_fix)
+        
+        object_order = np.arange(self.n_objects)
+        if shuffle_object_order:
+            np.random.shuffle(object_order)
+    
+        if sampling_mode == 'window':
+            streambits = []
+            for _ in range(approx_size // (round(expected_views) * self.n_objects)):
+                for o in object_order:
+                    n_views = self.get_n(n_fix) # get the n_fix for each object
+                    chosen_index = np.random.choice(np.arange(0, registry.object_nr.value_counts()[o] - n_views))
+                    streambits.append(registry[registry.object_nr == o][
+                                          registry.time_idx.between(chosen_index, chosen_index + n_views - 1)])
+                    if shuffle_object_order:
+                        np.random.shuffle(object_order)
+    
+            timestream = pd.concat(streambits, ignore_index=True)
+            timestream.time_idx = np.arange(len(timestream.time_idx))
+    
+        elif sampling_mode == 'uniform':
+            streambits = []
+            for _ in range(approx_size // (round(expected_views) * self.n_objects)):
+                for o in object_order:
+                    n_views = self.get_n(n_fix) # get the n_fix for each object
+                    chosen_indexs = np.random.choice(np.arange(0, registry.object_nr.value_counts()[o]), n_views)
+                    streambits.append(registry[registry.object_nr == o].iloc[chosen_indexs])
+    
+                    if shuffle_object_order:
+                        np.random.shuffle(object_order)
+    
+            timestream = pd.concat(streambits, ignore_index=True)
+            timestream.time_idx = np.arange(len(timestream.time_idx))
+    
+        elif sampling_mode == 'randomwalk':
+            streambits = []
+            for _ in range(approx_size // (round(expected_views) * self.n_objects)):
+                for o in object_order:
+                    n_views = self.get_n(n_fix) # get the n_fix for each object
+                    streambits.append(registry.iloc[self.get_N_randomwalk_steps(n_views, o, registry.object_nr.value_counts()[o])])
+    
+            timestream = pd.concat(streambits, ignore_index=True)
+            timestream.time_idx = np.arange(len(timestream.time_idx))
+    
+        else:
+            print("[INFO] Warning, no sampling mode specified, defaulting to \
+                whole dataset")
+            timestream = registry #if no mode, then return the whole registry
+    
+        return timestream
+    
+    
+
 # ----------------
 # main program
 # ----------------
 
 if __name__ == "__main__":
 
-    # Miyashita Dataset
+    # Road defects Dataset
     # -----
 
-    dataset = MiyashitaDataset(
+    dataset = RoadDefectsDataset(
         root='../data',
         train=True,
         transform=transforms.ToTensor(),
         contrastive=True,
         shuffle_object_order=False,
         circular_sampling=True,
-        buffer_size = 500,
+        buffer_size = 12*5,
     )
 
     # original timeseries
@@ -696,78 +856,101 @@ if __name__ == "__main__":
     for ibatch, sample_batched in enumerate(dataloader):
         show_batch(sample_batched)
 
-    # TDW Dataset
-    # -----
-
-    dataset = TDWDataset(
-        root='../data',
-        train=True,
-        transform=transforms.ToTensor(),
-        n_fix = 5,
-        contrastive=True,
-        sampling_mode='randomwalk',
-    )
-
-    # original timeseries
-    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=False)
-    for ibatch, sample_batched in enumerate(dataloader):
-        show_batch(sample_batched)
-        if ibatch == 3:
-            break
-
-    # shuffled timeseries
-    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=True)
-    for ibatch, sample_batched in enumerate(dataloader):
-        show_batch(sample_batched)
-        if ibatch == 3:
-            break
-    
-    # this is how you can implement refreshing the buffer
-    # ideally this should happen at the dataloader level, but for now it is defined
-    # within the dataset
-
-    dataset = TDWDataset(
-        root='../data',
-        train=True,
-        transform=transforms.ToTensor(),
-        contrastive=True,
-        sampling_mode='randomwalk',
-        buffer_size=1000,
-        n_fix=.5)
-
-    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=False)
-    epochs = 5
-    for e in range(epochs):
-        for ibatch, sample_batched in enumerate(dataloader):
-            print(sample_batched[0][0].shape)
-            if ibatch == 0:
-                show_batch(sample_batched)
-        # end of epoch
-        # rebuild the buffer
-        dataset.refresh_buffer()
-
-    # COIL100 Dataset
-    # -----
-
-    dataset = COIL100Dataset(
-        root='../data',
-        train=True,
-        transform=transforms.ToTensor(),
-        n_fix=5,
-        contrastive=True,
-        sampling_mode='randomwalk',
-    )
-
-    # original timeseries
-    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=False)
-    for ibatch, sample_batched in enumerate(dataloader):
-        show_batch(sample_batched)
-
-    # shuffled timeseries
-    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=True)
-    for ibatch, sample_batched in enumerate(dataloader):
-        show_batch(sample_batched)
-
+#    # Miyashita Dataset
+#    # -----
+#
+#    dataset = MiyashitaDataset(
+#        root='../data',
+#        train=True,
+#        transform=transforms.ToTensor(),
+#        contrastive=True,
+#        shuffle_object_order=False,
+#        circular_sampling=True,
+#        buffer_size = 500,
+#    )
+#
+#    # original timeseries
+#    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=False)
+#    for ibatch, sample_batched in enumerate(dataloader):
+#        show_batch(sample_batched)
+#
+#    # shuffled timeseries
+#    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=True)
+#    for ibatch, sample_batched in enumerate(dataloader):
+#        show_batch(sample_batched)
+#
+#    # TDW Dataset
+#    # -----
+#
+#    dataset = TDWDataset(
+#        root='../data',
+#        train=True,
+#        transform=transforms.ToTensor(),
+#        n_fix = 5,
+#        contrastive=True,
+#        sampling_mode='randomwalk',
+#    )
+#
+#    # original timeseries
+#    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=False)
+#    for ibatch, sample_batched in enumerate(dataloader):
+#        show_batch(sample_batched)
+#        if ibatch == 3:
+#            break
+#
+#    # shuffled timeseries
+#    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=True)
+#    for ibatch, sample_batched in enumerate(dataloader):
+#        show_batch(sample_batched)
+#        if ibatch == 3:
+#            break
+#    
+#    # this is how you can implement refreshing the buffer
+#    # ideally this should happen at the dataloader level, but for now it is defined
+#    # within the dataset
+#
+#    dataset = TDWDataset(
+#        root='../data',
+#        train=True,
+#        transform=transforms.ToTensor(),
+#        contrastive=True,
+#        sampling_mode='randomwalk',
+#        buffer_size=1000,
+#        n_fix=.5)
+#
+#    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=False)
+#    epochs = 5
+#    for e in range(epochs):
+#        for ibatch, sample_batched in enumerate(dataloader):
+#            print(sample_batched[0][0].shape)
+#            if ibatch == 0:
+#                show_batch(sample_batched)
+#        # end of epoch
+#        # rebuild the buffer
+#        dataset.refresh_buffer()
+#
+#    # COIL100 Dataset
+#    # -----
+#
+#    dataset = COIL100Dataset(
+#        root='../data',
+#        train=True,
+#        transform=transforms.ToTensor(),
+#        n_fix=5,
+#        contrastive=True,
+#        sampling_mode='randomwalk',
+#    )
+#
+#    # original timeseries
+#    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=False)
+#    for ibatch, sample_batched in enumerate(dataloader):
+#        show_batch(sample_batched)
+#
+#    # shuffled timeseries
+#    dataloader = DataLoader(dataset, batch_size=100, num_workers=0, shuffle=True)
+#    for ibatch, sample_batched in enumerate(dataloader):
+#        show_batch(sample_batched)
+#
 
 # _____________________________________________________________________________
 
