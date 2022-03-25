@@ -697,7 +697,8 @@ class RoadDefectsDataset(CLTTDataset):
         
         self.subdirectory = '/home/theo/workdir/mmcls/test/'  # where is the dataset
         self.name = 'Road defects'  # name of the dataset
-        self.label_file = '/home/theo/workdir/mmcls/test/no_contract_CD_33_20200911_122918_030.json'
+        self.label_file_train = 'data/defects_train.json'
+        self.label_file_train = 'data/defects_test.json'
 
         # custom properties (optional, dataset specific)
         # (anything you would want to have available in self)
@@ -738,21 +739,22 @@ class RoadDefectsDataset(CLTTDataset):
         # d = self.root + self.subdirectory
 #        d = self.subdirectory + 'train/' if train else self.subdirectory + 'test/'
         d = self.subdirectory
-
-        list_of_files = os.listdir(d)
-        list_of_files = [f for f in list_of_files if 'jpg' in f]
         
         #load labels
-        with open(self.label_file, 'r') as f_in:
-            labels = json.load(f_in)
+        if self.train:
+            with open(self.label_file_train, 'r') as f_in:
+                labels = json.load(f_in)
+        else:
+            with open(self.label_file_test, 'r') as f_in:
+                labels = json.load(f_in)
 
         # dict to count instances of each class/object
         time_dict = {l:0 for l in self.labels}
             
-        for path in list_of_files:
-            full_path = os.path.join(d, path)
+        for file_name, label_list in labels.items():
+            full_path = os.path.join(d, file_name)
             if os.path.isfile(full_path):
-                for label in set(labels[path]):
+                for label in set(label_list):
                     path_list.append(full_path)
                     object_list.append(self.labels.index(label))
                     label_list.append(self.labels.index(label))
