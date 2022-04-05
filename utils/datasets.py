@@ -695,10 +695,10 @@ class RoadDefectsDataset(CLTTDataset):
                        'Background'
         ]
         
-        self.subdirectory = '/home/theo/workdir/mmcls/test/'  # where is the dataset
+        self.subdirectory = '/home/finn/DATASET/CD33/'  # where is the dataset
         self.name = 'Road defects'  # name of the dataset
         self.label_file_train = 'data/defects_train.json'
-        self.label_file_train = 'data/defects_test.json'
+        self.label_file_test = 'data/defects_val_small.json'
 
         # custom properties (optional, dataset specific)
         # (anything you would want to have available in self)
@@ -719,12 +719,12 @@ class RoadDefectsDataset(CLTTDataset):
                 if (rand == 0) & (current_idx > 0):
                     current_idx -= 1
                     break
-                if (rand == 1) & (current_idx < self.n_views_per_object - 1):
+                if (rand == 1) & (current_idx < n_views_per_object - 1):
                     current_idx += 1
                     break
             index.append(current_idx)
         index = np.array(index)
-        index += self.n_views_per_object * object_nr
+        index += n_views_per_object * object_nr
         return index
 
     def build_registry(self, train):
@@ -751,10 +751,10 @@ class RoadDefectsDataset(CLTTDataset):
         # dict to count instances of each class/object
         time_dict = {l:0 for l in self.labels}
             
-        for file_name, label_list in labels.items():
+        for file_name, l_list in labels.items():
             full_path = os.path.join(d, file_name)
             if os.path.isfile(full_path):
-                for label in set(label_list):
+                for label in set(l_list):
                     path_list.append(full_path)
                     object_list.append(self.labels.index(label))
                     label_list.append(self.labels.index(label))

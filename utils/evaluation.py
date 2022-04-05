@@ -16,6 +16,7 @@ from matplotlib.patches import Patch
 from matplotlib.cm import get_cmap
 import seaborn as sb
 import numpy as np
+import tqdm
 
 import config
 
@@ -36,7 +37,7 @@ def get_representations(net, data_loader):
     net.eval()
     features = []
     labels = []
-    for data_samples, data_labels in data_loader:
+    for data_samples, data_labels in tqdm.tqdm(data_loader):
         features.append(net(data_samples.to(config.DEVICE))[0])
         labels.append(data_labels.to(config.DEVICE))
 

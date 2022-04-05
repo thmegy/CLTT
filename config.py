@@ -23,8 +23,8 @@ parser.add_argument('--n_negative',
                     default=None,
                     type=int)
 parser.add_argument('--dataset',
-                    default='TDW',
-                    choices=['TDW', 'Miyashita', 'COIL100'], type=str)
+                    default='RoadDefects',
+                    choices=['TDW', 'Miyashita', 'COIL100', 'RoadDefects'], type=str)
 parser.add_argument('--main_loss',
                     default='SimCLR',
                     choices=['SimCLR', 'BYOL', 'supervised'], type=str)
@@ -98,11 +98,11 @@ FEATURE_DIM = 128
 HIDDEN_DIM = 256
 LOG_DIR = 'save'
 N_EPOCHS = 100
-N_REPEAT = 5
+N_REPEAT = 1
 DEVICE = 'cuda' #switch to 'cpu' for local testing
 PRIOR = 'gaussian'
 TAU = 0.996
-BATCH_SIZE = 256
+BATCH_SIZE = 16
 CROP_SIZE = 32
 
 LR_DECAY_EPOCHS = [0] #[700, 800, 900]

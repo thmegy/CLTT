@@ -26,7 +26,7 @@ import config
 
 # custom libraries
 # -----
-from utils.datasets import TDWDataset, MiyashitaDataset, COIL100Dataset
+from utils.datasets import TDWDataset, MiyashitaDataset, COIL100Dataset, RoadDefectsDataset
 from utils.networks import ResNet18, MLPHead
 from utils.losses import RELIC_TT_Loss, BYOL_TT_Loss, SimCLR_TT_Loss, Decorrelation_TT_Loss
 from utils.general import update_target_net
@@ -65,6 +65,11 @@ DATASETS = {
             'rgb_mean': (0.3073, 0.2593, 0.2063),
             'rgb_std': (0.2391, 0.1947, 0.1579),
         },
+    'RoadDefects': {'class': RoadDefectsDataset,
+            'buffersize': 12*5*100,
+            'rgb_mean': (0.3073, 0.2593, 0.2063),
+            'rgb_std': (0.2391, 0.1947, 0.1579),
+        },
 }
 # custom function
 # -----
@@ -75,8 +80,19 @@ def train():
     writer = SummaryWriter(log_dir=os.path.join(config.LOG_DIR, config.RUN_NAME))
     
     # get transformations for validation and for training
-    train_transform, val_transform = transforms.ToTensor(), transforms.ToTensor()
-    
+#    train_transform, val_transform = transforms.ToTensor(), transforms.ToTensor()
+    train_transform = transforms.Compose([
+        transforms.Resize((640, 640)),
+        transforms.CenterCrop(224),
+        transforms.ToTensor()
+    ])
+
+    val_transform = transforms.Compose([
+        transforms.Resize((640, 640)),
+        transforms.CenterCrop(224),
+        transforms.ToTensor()
+    ])
+
         
     dataset_test = DATASETS[config.DATASET]['class'](
         root='data',
@@ -108,12 +124,13 @@ def train():
     # get initial result and save plot and record
     features, labels = get_representations(net, dataloader_test)
     acc = lls(features, labels, dataset_test.n_classes)
-    wb = wcss_bcss(features, labels, dataset_test.n_classes)
+#    wb = wcss_bcss(features, labels, dataset_test.n_classes)
     pacmap_plot = get_pacmap(features, labels, 0, 
         dataset_test.n_classes, dataset_test.labels)
-    print(f'Initial result: Read-Out Acc:{acc * 100:>6.2f}%, WCSS/BCSS:{wb:>8.4f}')
+#    print(f'Initial result: Read-Out Acc:{acc * 100:>6.2f}%, WCSS/BCSS:{wb:>8.4f}')
+    print(f'Initial result: Read-Out Acc:{acc * 100:>6.2f}%')
     writer.add_scalar('accloss/accuracy', acc, 0)
-    writer.add_scalar('analytics/WCSS-BCSS', wb, 0)
+#    writer.add_scalar('analytics/WCSS-BCSS', wb, 0)
     writer.add_figure('PacMap', pacmap_plot, 0)
     if config.SAVE_EMBEDDING:
         writer.add_embedding(features, tag='Embedding', global_step=0)
@@ -176,17 +193,18 @@ def train():
         
         features, labels = get_representations(net, dataloader_test)
         acc = lls(features, labels, dataset_test.n_classes)
-        wb = wcss_bcss(features, labels, dataset_test.n_classes)
+#        wb = wcss_bcss(features, labels, dataset_test.n_classes)
         pacmap_plot = get_pacmap(features, labels, epoch + 1,
             dataset_test.n_classes, dataset_test.labels)
         similarity_plot = get_neighbor_similarity(features, labels, epoch + 1)
         print(f"Method: {config.RUN_NAME.split('~')[0]}, Epoch: {epoch + 1}, "
-              f"Read-Out Acc:{acc * 100:>6.2f}%, WCSS/BCSS:{wb:>8.4f}")
+              f"Read-Out Acc:{acc * 100:>6.2f}%")
+#              f"Read-Out Acc:{acc * 100:>6.2f}%, WCSS/BCSS:{wb:>8.4f}")
 
         # record results
         writer.add_scalar('accloss/loss', loss.item(), epoch + 1)
         writer.add_scalar('accloss/accuracy', acc, epoch + 1)
-        writer.add_scalar('analytics/WCSS-BCSS', wb, epoch + 1)
+#        writer.add_scalar('analytics/WCSS-BCSS', wb, epoch + 1)
         writer.add_scalar('analytics/learningrate', scheduler.get_last_lr()[0], epoch + 1)
         writer.add_figure('PacMap', pacmap_plot, epoch + 1)
         writer.add_figure('Object-Similarity', similarity_plot, epoch + 1)
